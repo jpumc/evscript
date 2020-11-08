@@ -115,6 +115,8 @@ impl Into<raw::uinput_setup> for DeviceConfig {
 #[derive(Default, Deserialize)]
 struct EventsConfig {
     keys: Option<Vec<String>>,
+    btns: Option<Vec<String>>,
+    rels: Option<Vec<String>>,
     // TODO: other events
 }
 
@@ -147,7 +149,7 @@ dyon_fn!{fn next_events(arr: Vec<Variable>) -> Vec<InputEvent> {
         let _ = poll(&mut pfds, -1).expect("poll()");
         if let Some(i) = pfds.iter().position(|pfd| pfd.revents().unwrap_or(EventFlags::empty()).contains(EventFlags::POLLIN)) {
             let evts = with_unwrapped_device!(
-                &arr[i as usize], |dev : &mut Device| dev.events().expect(".events()").collect::<Vec<_>>());
+                &arr[i as usize], |dev : &mut Device| dev.events_no_sync().expect(".events()").collect::<Vec<_>>());
             return evts.iter().map(|evt| InputEvent {
                 kind: evt._type as u32,
                 code: evt.code as u32,
@@ -288,6 +290,40 @@ fn main() {
                     ubuilder.fd(),
                     data::Key::from_str(&format!("KEY_{}", key)).expect("Unknown key in script config") as i32
                 )).expect("ioctl set_keybit");
+            }
+        }
+
+        if let Some(btns) = script_conf.events.btns {
+            uinput_ioctl!(ui_set_evbit(ubuilder.fd(), data::KEY.number())).expect("ioctl set_evbit");
+            for btn in btns {
+                uinput_ioctl!(ui_set_keybit(
+                    ubuilder.fd(),
+                    data::Key::from_str(&format!("BTN_{}", btn)).expect("Unknown btn in script config") as i32
+                )).expect("ioctl set_keybit");
+            }
+        }
+
+        if let Some(rels) = script_conf.events.rels {
+            uinput_ioctl!(ui_set_evbit(ubuilder.fd(), data::RELATIVE.number())).expect("ioctl set_evbit");
+            for rel in rels {
+                uinput_ioctl!(ui_set_relbit(
+                    ubuilder.fd(),
+                    match rel.as_ref() {
+                        "X" => 0x00,
+                        "Y" => 0x01,
+                        "Z" => 0x02,
+                        "RX" => 0x03,
+                        "RY" => 0x04,
+                        "RZ" => 0x05,
+                        "HWHEEL" => 0x06,
+                        "DIAL" => 0x07,
+                        "WHEEL" => 0x08,
+                        "MISC" => 0x09,
+                        "WHEEL_HI_RES" => 0x0b,
+                        "HWHEEL_HI_RES" => 0x0c,
+                        _ => panic!("Unknown rel in script config")
+                    }
+                )).expect("ioctl set_relbit");
             }
         }
     }
